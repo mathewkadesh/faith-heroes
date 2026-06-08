@@ -1,0 +1,6 @@
+module.exports = (req, res, next) => {
+  if (!req.profile || req.profile.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
