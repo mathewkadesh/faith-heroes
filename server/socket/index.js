@@ -1,5 +1,6 @@
 const { Server } = require('socket.io');
-const supabase = require('../config/supabase');
+const jwt = require('jsonwebtoken');
+const { pool } = require('../db/neon');
 const socketService = require('../services/socket.service');
 
 function initSocket(httpServer) {
@@ -16,19 +17,18 @@ function initSocket(httpServer) {
   io.on('connection', socket => {
     socket.on('authenticate', async (token) => {
       try {
-        const { data: { user }, error } = await supabase.auth.getUser(token);
-        if (error || !user) return socket.disconnect(true);
+        const payload = jwt.verify(token, process.env.JWT_SECRET || 'faith-heroes-dev-secret-change-me');
+        const { rows } = await pool.query('select id, role from profiles where id = $1 limit 1', [payload.sub]);
+        const profile = rows[0];
+        if (!profile) return socket.disconnect(true);
 
-        const { data: profile } = await supabase
-          .from('profiles').select('role').eq('id', user.id).single();
-
-        socket.userId = user.id;
+        socket.userId = profile.id;
         socket.isAdmin = profile?.role === 'admin';
 
-        socketService.connectedUsers.set(user.id, socket.id);
+        socketService.connectedUsers.set(profile.id, socket.id);
         if (socket.isAdmin) socketService.connectedAdmins.add(socket.id);
 
-        socket.emit('authenticated', { userId: user.id, isAdmin: socket.isAdmin });
+        socket.emit('authenticated', { userId: profile.id, isAdmin: socket.isAdmin });
       } catch {
         socket.disconnect(true);
       }

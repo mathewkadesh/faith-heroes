@@ -1,4 +1,4 @@
-const supabase = require('../config/supabase');
+const db = require('../config/database');
 
 exports.getStats = async (req, res, next) => {
   try {
@@ -14,13 +14,13 @@ exports.getStats = async (req, res, next) => {
       { count: unread },
       { data: lowStock },
     ] = await Promise.all([
-      supabase.from('orders').select('*', { count: 'exact', head: true }).gte('created_at', month),
-      supabase.from('orders').select('total_amount').gte('created_at', month).eq('status', 'delivered'),
-      supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-      supabase.from('community_stories').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-      supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'customer'),
-      supabase.from('contact_messages').select('*', { count: 'exact', head: true }).eq('is_read', false),
-      supabase.from('products').select('id, name, stock_qty').lt('stock_qty', 5).eq('is_active', true),
+      db.from('orders').select('*', { count: 'exact', head: true }).gte('created_at', month),
+      db.from('orders').select('total_amount').gte('created_at', month).eq('status', 'delivered'),
+      db.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+      db.from('community_stories').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+      db.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'customer'),
+      db.from('contact_messages').select('*', { count: 'exact', head: true }).eq('is_read', false),
+      db.from('products').select('id, name, stock_qty').lt('stock_qty', 5).eq('is_active', true),
     ]);
 
     const totalRevenue = revenue?.reduce((s, o) => s + Number(o.total_amount), 0) || 0;
@@ -41,7 +41,7 @@ exports.getRevenue = async (req, res, next) => {
     const days = Number(req.query.days) || 30;
     const from = new Date(); from.setDate(from.getDate() - days);
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('orders').select('created_at, total_amount')
       .gte('created_at', from.toISOString()).eq('status', 'delivered');
     if (error) throw error;
@@ -64,7 +64,7 @@ exports.getRevenue = async (req, res, next) => {
 
 exports.getCustomers = async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('profiles').select('*, orders(id, total_amount)')
       .order('created_at', { ascending: false });
     if (error) throw error;
@@ -75,7 +75,7 @@ exports.getCustomers = async (req, res, next) => {
 exports.updateRole = async (req, res, next) => {
   try {
     const { role } = req.body;
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('profiles').update({ role }).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });
@@ -84,7 +84,7 @@ exports.updateRole = async (req, res, next) => {
 
 exports.getMessages = async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('contact_messages').select('*').order('created_at', { ascending: false });
     if (error) throw error;
     res.json({ success: true, data });
@@ -93,7 +93,7 @@ exports.getMessages = async (req, res, next) => {
 
 exports.markRead = async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('contact_messages').update({ is_read: true }).eq('id', req.params.id).select().single();
     if (error) throw error;
     res.json({ success: true, data });

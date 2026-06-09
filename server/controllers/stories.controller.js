@@ -1,10 +1,10 @@
-const supabase = require('../config/supabase');
+const db = require('../config/database');
 const { emitToAdmins } = require('../services/socket.service');
 
 exports.getApproved = async (req, res, next) => {
   try {
     const status = req.query.status || 'approved';
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('community_stories')
       .select('*, profiles(full_name, avatar_url)')
       .eq('status', status)
@@ -16,7 +16,7 @@ exports.getApproved = async (req, res, next) => {
 
 exports.getPending = async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('community_stories')
       .select('*, profiles(full_name, email)')
       .eq('status', 'pending')
@@ -28,7 +28,7 @@ exports.getPending = async (req, res, next) => {
 
 exports.submit = async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('community_stories')
       .insert([{ ...req.body, user_id: req.user.id, status: 'pending' }])
       .select().single();
@@ -40,7 +40,7 @@ exports.submit = async (req, res, next) => {
 
 exports.approve = async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('community_stories').update({ status: 'approved' })
       .eq('id', req.params.id).select().single();
     if (error) throw error;
@@ -51,7 +51,7 @@ exports.approve = async (req, res, next) => {
 exports.reject = async (req, res, next) => {
   try {
     const { admin_notes } = req.body;
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('community_stories').update({ status: 'rejected', admin_notes })
       .eq('id', req.params.id).select().single();
     if (error) throw error;

@@ -1,5 +1,5 @@
 const stripe    = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const supabase  = require('../config/supabase');
+const db  = require('../config/database');
 const emailService = require('../services/email.service');
 const { emitToAdmins, emitToAll } = require('../services/socket.service');
 const sigItemService = require('../services/signatureItems.service');
@@ -13,7 +13,7 @@ exports.createStripeSession = async (req, res, next) => {
     for (const item of items || []) {
       const promotionId = item.promotion_id || (String(item.product_id || '').startsWith('promotion-') ? String(item.product_id).replace('promotion-', '') : '');
       if (promotionId) {
-        const { data: promotion, error: promotionError } = await supabase
+        const { data: promotion, error: promotionError } = await db
           .from('promotions')
           .select('*, characters(name, figure_image_url, lid_image_url)')
           .eq('id', promotionId)
@@ -49,7 +49,7 @@ exports.createStripeSession = async (req, res, next) => {
         continue;
       }
 
-      const { data: product, error } = await supabase
+      const { data: product, error } = await db
         .from('products')
         .select('*, characters(name, lid_image_url)')
         .eq('id', item.product_id)
@@ -162,7 +162,7 @@ exports.stripeWebhook = async (req, res, next) => {
       const parsedItems = JSON.parse(session.metadata?.items_json || '[]');
       const firstPromotion = parsedItems.find(item => item.promotion_id || String(item.product_id || '').startsWith('promotion-'));
       const promotionId = firstPromotion?.promotion_id || (firstPromotion ? String(firstPromotion.product_id).replace('promotion-', '') : null);
-      const { data: order } = await supabase.from('orders').insert([{
+      const { data: order } = await db.from('orders').insert([{
         payment_intent_id: session.payment_intent,
         payment_method: 'stripe',
         status: 'confirmed',
@@ -179,17 +179,17 @@ exports.stripeWebhook = async (req, res, next) => {
         const itemPromotionId = item.promotion_id || (String(item.product_id || '').startsWith('promotion-') ? String(item.product_id).replace('promotion-', '') : null);
         if (!itemPromotionId) continue;
         const qty = Number(item.quantity || 1);
-        const { error: decrementError } = await supabase.rpc('decrement_promo_stock', {
+        const { error: decrementError } = await db.rpc('decrement_promo_stock', {
           promo_id: itemPromotionId,
           qty,
         });
         if (decrementError) {
-          const { data: current } = await supabase.from('promotions').select('remaining_stock').eq('id', itemPromotionId).single();
+          const { data: current } = await db.from('promotions').select('remaining_stock').eq('id', itemPromotionId).single();
           const remaining = Math.max(0, Number(current?.remaining_stock || 0) - qty);
-          await supabase.from('promotions').update({ remaining_stock: remaining }).eq('id', itemPromotionId);
+          await db.from('promotions').update({ remaining_stock: remaining }).eq('id', itemPromotionId);
           emitToAll('promotion:updated', { id: itemPromotionId, remaining_stock: remaining });
         } else {
-          const { data: current } = await supabase.from('promotions').select('remaining_stock').eq('id', itemPromotionId).single();
+          const { data: current } = await db.from('promotions').select('remaining_stock').eq('id', itemPromotionId).single();
           emitToAll('promotion:updated', { id: itemPromotionId, remaining_stock: current?.remaining_stock });
         }
       }

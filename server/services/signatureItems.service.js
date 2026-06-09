@@ -1,5 +1,5 @@
-const supabase = require('../config/supabase');
-const { randomUUID } = require('crypto');
+const db = require('../config/database');
+const { saveBuffer } = require('./localUpload.service');
 
 function isMissingSignatureTable(error) {
   return /relation .*signature_items.* does not exist/i.test(error?.message || '');
@@ -13,18 +13,10 @@ function groupItems(items) {
   };
 }
 
-async function ensureBucket(bucket) {
-  const { error } = await supabase.storage.getBucket(bucket);
-  if (!error) return;
-
-  const { error: createError } = await supabase.storage.createBucket(bucket, { public: true });
-  if (createError && !/already exists/i.test(createError.message || '')) throw createError;
-}
-
 exports.isMissingSignatureTable = isMissingSignatureTable;
 
 exports.getByCharacter = async (characterId) => {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('signature_items')
     .select('*')
     .eq('character_id', characterId)
@@ -40,7 +32,7 @@ exports.getByCharacter = async (characterId) => {
 };
 
 exports.getOne = async (itemId) => {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('signature_items')
     .select(`
       *,
@@ -62,7 +54,7 @@ exports.getOne = async (itemId) => {
 };
 
 exports.getByCharacterAdmin = async (characterId) => {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('signature_items')
     .select('*')
     .eq('character_id', characterId)
@@ -73,7 +65,7 @@ exports.getByCharacterAdmin = async (characterId) => {
 };
 
 exports.create = async (payload) => {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('signature_items')
     .insert([payload])
     .select()
@@ -84,7 +76,7 @@ exports.create = async (payload) => {
 };
 
 exports.update = async (itemId, payload) => {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('signature_items')
     .update(payload)
     .eq('id', itemId)
@@ -96,18 +88,13 @@ exports.update = async (itemId, payload) => {
 };
 
 exports.remove = async (itemId) => {
-  const { data: item } = await supabase
+  const { data: item } = await db
     .from('signature_items')
     .select('image_url')
     .eq('id', itemId)
     .single();
 
-  if (item?.image_url) {
-    const filename = item.image_url.split('/').pop();
-    await supabase.storage.from('character-images').remove([`signature-items/${filename}`]);
-  }
-
-  const { error } = await supabase
+  const { error } = await db
     .from('signature_items')
     .delete()
     .eq('id', itemId);
@@ -117,14 +104,14 @@ exports.remove = async (itemId) => {
 };
 
 exports.toggleActive = async (itemId) => {
-  const { data: current, error: currentError } = await supabase
+  const { data: current, error: currentError } = await db
     .from('signature_items')
     .select('is_active')
     .eq('id', itemId)
     .single();
   if (currentError) throw currentError;
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('signature_items')
     .update({ is_active: !current.is_active })
     .eq('id', itemId)
@@ -137,29 +124,16 @@ exports.toggleActive = async (itemId) => {
 
 exports.reorder = async (items) => {
   const updates = items.map(({ id, sort_order }) =>
-    supabase.from('signature_items').update({ sort_order }).eq('id', id)
+    db.from('signature_items').update({ sort_order }).eq('id', id)
   );
   await Promise.all(updates);
   return { reordered: true };
 };
 
 exports.uploadImage = async (itemId, fileBuffer, mimetype) => {
-  const ext = (mimetype.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '');
-  const filename = `signature-items/${itemId}-${randomUUID()}.${ext}`;
+  const publicUrl = await saveBuffer('signature-items', fileBuffer, mimetype);
 
-  await ensureBucket('character-images');
-
-  const { error: uploadError } = await supabase.storage
-    .from('character-images')
-    .upload(filename, fileBuffer, { contentType: mimetype, upsert: true });
-
-  if (uploadError) throw uploadError;
-
-  const { data: { publicUrl } } = supabase.storage
-    .from('character-images')
-    .getPublicUrl(filename);
-
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('signature_items')
     .update({ image_url: publicUrl })
     .eq('id', itemId)
@@ -171,7 +145,7 @@ exports.uploadImage = async (itemId, fileBuffer, mimetype) => {
 };
 
 exports.updateStock = async (itemId, stock_qty) => {
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('signature_items')
     .update({ stock_qty })
     .eq('id', itemId)
@@ -185,7 +159,7 @@ exports.updateStock = async (itemId, stock_qty) => {
 exports.validateAddons = async (addonIds) => {
   if (!addonIds || addonIds.length === 0) return [];
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('signature_items')
     .select('id, name, price, stock_qty, is_addon, is_active, image_url')
     .in('id', addonIds)

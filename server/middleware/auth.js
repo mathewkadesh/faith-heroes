@@ -1,6 +1,13 @@
-const supabase = require('../config/supabase');
+const jwt = require('jsonwebtoken');
+const { pool } = require('../db/neon');
 
-module.exports = async (req, res, next) => {
+const JWT_SECRET = process.env.JWT_SECRET || 'faith-heroes-dev-secret-change-me';
+
+function generateToken(userId, role = 'customer') {
+  return jwt.sign({ sub: userId, role }, JWT_SECRET, { expiresIn: '7d' });
+}
+
+async function verifyToken(req, res, next) {
   const devSecret = req.headers['x-dev-admin-secret'];
   if (
     process.env.NODE_ENV !== 'production' &&
@@ -13,17 +20,23 @@ module.exports = async (req, res, next) => {
   }
 
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'No token provided' });
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, error: 'No token provided' });
   }
-  const token = authHeader.split(' ')[1];
-  const { data: { user }, error } = await supabase.auth.getUser(token);
-  if (error || !user) {
-    return res.status(401).json({ error: 'Invalid or expired token' });
+
+  try {
+    const payload = jwt.verify(authHeader.slice(7), JWT_SECRET);
+    const result = await pool.query('select * from profiles where id = $1 limit 1', [payload.sub]);
+    const profile = result.rows[0];
+    if (!profile) return res.status(401).json({ success: false, error: 'Invalid token user' });
+    req.user = { id: profile.id, email: profile.email };
+    req.profile = profile;
+    next();
+  } catch {
+    res.status(401).json({ success: false, error: 'Invalid or expired token' });
   }
-  const { data: profile } = await supabase
-    .from('profiles').select('*').eq('id', user.id).single();
-  req.user = user;
-  req.profile = profile;
-  next();
-};
+}
+
+module.exports = verifyToken;
+module.exports.verifyToken = verifyToken;
+module.exports.generateToken = generateToken;

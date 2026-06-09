@@ -1,4 +1,4 @@
-const supabase      = require('../config/supabase');
+const db      = require('../config/database');
 const { emitToAdmins, emitToUser } = require('../services/socket.service');
 const emailService  = require('../services/email.service');
 const stripeService = require('../services/stripe.service');
@@ -38,7 +38,7 @@ async function orderQueryWithSignatureFallback(builder) {
 exports.getAll = async (req, res, next) => {
   try {
     const { status, search, page = 1, limit = 20 } = req.query;
-    let q = supabase
+    let q = db
       .from('orders')
       .select('*, profiles(full_name, email), order_items(*, products(name, characters(name)))')
       .order('created_at', { ascending: false })
@@ -53,7 +53,7 @@ exports.getAll = async (req, res, next) => {
 
 exports.getMyOrders = async (req, res, next) => {
   try {
-    const { data, error } = await orderQueryWithSignatureFallback((select) => supabase
+    const { data, error } = await orderQueryWithSignatureFallback((select) => db
       .from('orders')
       .select(select)
       .eq('user_id', req.user.id)
@@ -65,7 +65,7 @@ exports.getMyOrders = async (req, res, next) => {
 
 exports.getOne = async (req, res, next) => {
   try {
-    const { data, error } = await orderQueryWithSignatureFallback((select) => supabase
+    const { data, error } = await orderQueryWithSignatureFallback((select) => db
       .from('orders')
       .select(select)
       .eq('id', req.params.id).single());
@@ -80,7 +80,7 @@ exports.getOne = async (req, res, next) => {
 
 exports.trackByNumber = async (req, res, next) => {
   try {
-    const { data, error } = await orderQueryWithSignatureFallback((select) => supabase
+    const { data, error } = await orderQueryWithSignatureFallback((select) => db
       .from('orders')
       .select(select)
       .eq('order_number', req.params.orderNumber).single());
@@ -92,7 +92,7 @@ exports.trackByNumber = async (req, res, next) => {
 exports.trackByEmail = async (req, res, next) => {
   try {
     const email = String(req.params.email || '').trim().toLowerCase();
-    const { data, error } = await orderQueryWithSignatureFallback((select) => supabase
+    const { data, error } = await orderQueryWithSignatureFallback((select) => db
       .from('orders')
       .select(select)
       .ilike('shipping_email', email)
@@ -110,7 +110,7 @@ exports.create = async (req, res, next) => {
             payment_method, payment_intent_id } = req.body;
 
     const productIds = items.map(i => i.product_id);
-    const { data: products } = await supabase
+    const { data: products } = await db
       .from('products').select('id, price, stock_qty, character_id').in('id', productIds);
 
     let total = 0;
@@ -130,7 +130,7 @@ exports.create = async (req, res, next) => {
       if (item.customisation?.name_tag) total += 2 * item.quantity;
     }
 
-    const { data: order, error: orderErr } = await supabase
+    const { data: order, error: orderErr } = await db
       .from('orders')
       .insert([{ user_id: req.user.id, total_amount: total, currency: 'GBP',
                  payment_method, payment_intent_id, is_gift, gift_message,
@@ -145,7 +145,7 @@ exports.create = async (req, res, next) => {
                quantity: item.quantity, unit_price: Number(product.price),
                customisation: item.customisation || {} };
     });
-    const { data: insertedOrderItems, error: orderItemsError } = await supabase
+    const { data: insertedOrderItems, error: orderItemsError } = await db
       .from('order_items')
       .insert(orderItems)
       .select();
@@ -157,7 +157,7 @@ exports.create = async (req, res, next) => {
         const orderItem = (insertedOrderItems || []).find(row => row.product_id === item.product_id);
         if (!product || !orderItem) continue;
 
-        const { data: includedItems, error: includedError } = await supabase
+        const { data: includedItems, error: includedError } = await db
           .from('signature_items')
           .select('id, price')
           .eq('character_id', product.character_id)
@@ -167,7 +167,7 @@ exports.create = async (req, res, next) => {
         if (includedError && !sigItemService.isMissingSignatureTable(includedError)) throw includedError;
 
         if (includedItems?.length > 0) {
-          await supabase.from('signature_item_orders').insert(includedItems.map(si => ({
+          await db.from('signature_item_orders').insert(includedItems.map(si => ({
             order_item_id: orderItem.id,
             signature_item_id: si.id,
             quantity: item.quantity,
@@ -178,7 +178,7 @@ exports.create = async (req, res, next) => {
 
         const addonItems = addonsByProduct[item.product_id] || [];
         if (addonItems.length > 0) {
-          await supabase.from('signature_item_orders').insert(addonItems.map(si => ({
+          await db.from('signature_item_orders').insert(addonItems.map(si => ({
             order_item_id: orderItem.id,
             signature_item_id: si.id,
             quantity: item.quantity,
@@ -187,13 +187,13 @@ exports.create = async (req, res, next) => {
           })));
 
           for (const addon of addonItems) {
-            const { error: decrementError } = await supabase.rpc('decrement_sig_item_stock', {
+            const { error: decrementError } = await db.rpc('decrement_sig_item_stock', {
               item_id: addon.id,
               qty: item.quantity,
             });
             if (decrementError) {
-              const { data: current } = await supabase.from('signature_items').select('stock_qty').eq('id', addon.id).single();
-              await supabase
+              const { data: current } = await db.from('signature_items').select('stock_qty').eq('id', addon.id).single();
+              await db
                 .from('signature_items')
                 .update({ stock_qty: Math.max(0, Number(current?.stock_qty || 0) - item.quantity) })
                 .eq('id', addon.id);
@@ -207,7 +207,7 @@ exports.create = async (req, res, next) => {
 
     for (const item of items) {
       const product = products.find(p => p.id === item.product_id);
-      await supabase.from('products')
+      await db.from('products')
         .update({ stock_qty: product.stock_qty - item.quantity }).eq('id', item.product_id);
     }
 
@@ -223,7 +223,7 @@ exports.create = async (req, res, next) => {
 exports.updateStatus = async (req, res, next) => {
   try {
     const { status, admin_notes } = req.body;
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('orders').update({ status, admin_notes })
       .eq('id', req.params.id).select('*, profiles(email, full_name)').single();
     if (error) throw error;
@@ -236,7 +236,7 @@ exports.updateStatus = async (req, res, next) => {
 exports.addTracking = async (req, res, next) => {
   try {
     const { tracking_number, carrier, tracking_url, estimated_delivery } = req.body;
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('orders')
       .update({ tracking_number, carrier, tracking_url, estimated_delivery, status: 'shipped' })
       .eq('id', req.params.id).select('*, profiles(email)').single();
@@ -250,12 +250,12 @@ exports.addTracking = async (req, res, next) => {
 
 exports.refund = async (req, res, next) => {
   try {
-    const { data: order } = await supabase
+    const { data: order } = await db
       .from('orders').select('*').eq('id', req.params.id).single();
     if (order.payment_intent_id) {
       await stripeService.refundPayment(order.payment_intent_id);
     }
-    const { data } = await supabase
+    const { data } = await db
       .from('orders').update({ status: 'refunded' }).eq('id', req.params.id).select().single();
     emitToAdmins('order:updated', data);
     res.json({ success: true, message: 'Refund processed' });
